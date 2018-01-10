@@ -4,8 +4,6 @@ import xlrd
 import glob
 import csv
 
-filename="Raw data-105 shoal data-Trial     1.xlsx"
-
 class Fish(object):
 	def __init__(self, df):
 		self.df = pd.DataFrame(data=df, copy=True)
@@ -39,13 +37,60 @@ class Fish(object):
 		messy.drop(messy.columns[:3], axis=1, inplace=True)
 
 def compile(shoal):
+	sid = shoal[0].shoalid
+	gr = shoal[0].group
+	dfconv = []
+	for s in shoal:
+		dfconv.append(s.df)
+	combo = pd.concat(dfconv, axis=1)
+	combo["Avg"] = combo[combo.columns].mean(axis=1)
+	combo.drop(combo.columns[:4], axis=1, inplace=True)
+	combo.set_index(pd.to_datetime(combo.index * 1000, unit="ms"), inplace=True)
+	avgmin = combo.resample("T").mean()
+	minutes = []
+	for m in range(len(avgmin)):
+		minutes.append("Min" + str(m+1))
+	avgmin["Minute"] = minutes
+	avgmin["ShoalID"] = sid
+	pivoted = avgmin.pivot(index="ShoalID", columns="Minute", values="Avg")
+	pivoted["Mutant"] = gr
+	return pivoted
 
+def parse(imp):
+	sheets = imp.sheet_names
+	fish = []
+	shoallist = []
+	shoals = []
+	out = []
+	for sheet in sheets: 
+		fish.append(Fish(imp.parse(sheet)))
+	for f in fish:
+		if f.shoalid not in shoallist:
+			shoallist.append(f.shoalid)
+			shoals.append([])
+	for i,s in enumerate(shoallist): 
+		for f in fish: 
+			if f.shoalid == s: 
+				shoals[i].append(f)
+	for shoal in shoals:
+		out.append(compile(shoal))
+	return pd.concat(out, axis=0)
 
-imp = pd.ExcelFile(filename)
-sheets = imp.sheet_names
+def main():
+	summary = []
+	files = glob.glob("*.xlsx")
+	total = len(files)
+	count = 0
+	for file in files:
+		print("Parsing " + file)
+		try:
+			summary.append(parse(pd.ExcelFile(file)))
+			count += 1
+			print(str(int((count/total)*100)) + "% done.")
+		except:
+			print("Failed.")
+			continue
+	final = pd.concat(summary, axis=0)
+	return final
 
-fish = []
-shoalcount = []
-
-for sheet in sheets:
-	fish.append(Fish(imp.parse(sheet)))
+main().to_excel("result.xlsx")
